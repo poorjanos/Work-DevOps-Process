@@ -1,0 +1,87 @@
+---
+title: "DevOps Process Explanatory Data Analysis"
+author: "János Poór"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+
+```{r knitr_init, echo=FALSE, cache=FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(here)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(tidyr)
+```
+
+```{r, message=FALSE, include=FALSE}
+#########################################################################################
+# Data Extraction #######################################################################
+#########################################################################################
+
+# Set JAVA_HOME, set max. memory, and load rJava library
+Sys.setenv(JAVA_HOME = "C:\\Program Files\\Java\\jre1.8.0_171")
+options(java.parameters = "-Xmx2g")
+library(rJava)
+
+# Output Java version
+.jinit()
+print(.jcall("java/lang/System", "S", "getProperty", "java.version"))
+
+# Load RJDBC library
+library(RJDBC)
+
+# Get credentials
+datamnr <-
+  config::get("datamnr", file = "C:\\Users\\PoorJ\\Projects\\config.yml")
+
+# Create connection driver
+jdbcDriver <-
+  JDBC(driverClass = "oracle.jdbc.OracleDriver", classPath = "C:\\Users\\PoorJ\\Desktop\\ojdbc7.jar")
+
+# Open connection: kontakt---------------------------------------------------------------
+jdbcConnection <-
+  dbConnect(
+    jdbcDriver,
+    url = datamnr$server,
+    user = datamnr$uid,
+    password = datamnr$pwd
+  )
+
+
+# Get SQL scripts
+readQuery <-
+  function(file)
+    paste(readLines(file, warn = FALSE), collapse = "\n")
+
+# Fetch data
+query_isd <- readQuery(here::here("SQL", "get_ISD_data.sql"))
+t_isd <- dbGetQuery(jdbcConnection, query_isd)
+
+# Close db connection: kontakt
+dbDisconnect(jdbcConnection)
+
+
+# Transformations
+t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED))
+```
+
