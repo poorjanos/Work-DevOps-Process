@@ -82,6 +82,88 @@ dbDisconnect(jdbcConnection)
 
 
 # Transformations
-t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED))
+t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED),
+                          TIMESTAMP = ymd_hms(TIMESTAMP))
 ```
 
+
+# Number of Tickets Started and Closed
+```{r, fig.width=12}
+t_started <- t_isd %>%
+  # Transform data
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  mutate(EVENT_MONTH = floor_date(TIMESTAMP, unit = "month")) %>%
+  group_by(CASE, CLASSIFICATION) %>%
+  summarize(MONTH = min(EVENT_MONTH)) %>%
+  ungroup() %>%
+  group_by(MONTH, CLASSIFICATION) %>%
+  summarize(STARTED = n()) %>%
+  ungroup()
+
+t_closed <- t_isd %>%
+  # Transform data
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  mutate(EVENT_MONTH = floor_date(TIMESTAMP, unit = "month")) %>%
+  group_by(CASE, CLASSIFICATION) %>%
+  summarize(MONTH = max(EVENT_MONTH)) %>%
+  ungroup() %>%
+  group_by(MONTH, CLASSIFICATION) %>%
+  summarize(CLOSED = n()) %>%
+  ungroup()
+
+t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION")) %>%
+  tidyr::gather(-MONTH, -CLASSIFICATION, key = METRIC, value = COUNT) %>% 
+  tidyr::replace_na(list(COUNT = 0)) %>% 
+  # Plot
+  ggplot(aes(x = substr(as.character(MONTH), 1, 7), y = COUNT, group = METRIC, colour = METRIC)) +
+  geom_line(size = 0.8) +
+  #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(.~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
+  labs(
+    x = "Month",
+    y = "# of Tickets",
+    title = "Number of Tickets Started and Closed"
+  )
+```
+
+
+# Number of Tickets Started and Closed by Application Group
+```{r, fig.width=12}
+t_started <- t_isd %>%
+  # Transform data
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  mutate(EVENT_MONTH = floor_date(TIMESTAMP, unit = "month")) %>%
+  group_by(CASE, CLASSIFICATION, APPGROUP) %>%
+  summarize(MONTH = min(EVENT_MONTH)) %>%
+  ungroup() %>%
+  group_by(MONTH, CLASSIFICATION, APPGROUP) %>%
+  summarize(STARTED = n()) %>%
+  ungroup()
+
+t_closed <- t_isd %>%
+  # Transform data
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  mutate(EVENT_MONTH = floor_date(TIMESTAMP, unit = "month")) %>%
+  group_by(CASE, CLASSIFICATION, APPGROUP) %>%
+  summarize(MONTH = max(EVENT_MONTH)) %>%
+  ungroup() %>%
+  group_by(MONTH, CLASSIFICATION, APPGROUP) %>%
+  summarize(CLOSED = n()) %>%
+  ungroup()
+
+t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION", "APPGROUP")) %>%
+  tidyr::gather(-MONTH, -CLASSIFICATION, -APPGROUP, key = METRIC, value = COUNT) %>% 
+  tidyr::replace_na(list(COUNT = 0)) %>% 
+  # Plot
+  ggplot(aes(x = substr(as.character(MONTH), 1, 7), y = COUNT, group = METRIC, colour = METRIC)) +
+  geom_line(size = 0.8) +
+  #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
+  labs(
+    x = "Month",
+    y = "# of Tickets",
+    title = "Number of Tickets Started and Closed"
+  )
+```
