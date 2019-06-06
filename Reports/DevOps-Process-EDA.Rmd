@@ -31,6 +31,11 @@ library(ggplot2)
 library(lubridate)
 library(scales)
 library(tidyr)
+library(purrr)
+library(bupaR)
+library(processmapR)
+library(DiagrammeR)
+library(forcats)
 ```
 
 ```{r, message=FALSE, include=FALSE}
@@ -159,11 +164,237 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION", "APPGROUP"))
   ggplot(aes(x = substr(as.character(MONTH), 1, 7), y = COUNT, group = METRIC, colour = METRIC)) +
   geom_line(size = 0.8) +
   #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
-  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0)) +
   facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
   labs(
     x = "Month",
     y = "# of Tickets",
-    title = "Number of Tickets Started and Closed"
+    title = "Number of Tickets Started and Closed by Application Group"
   )
+```
+
+# Process Structure by Case Type
+
+Each case type is a different contact reason. Thus this part of the analysis is run for case types separately.
+
+``` {r}
+# Add cols to event log required by BupaR
+t_isd_eventlog <- t_isd %>%
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  arrange(CASE, TIMESTAMP) %>%
+  mutate(
+    ACTIVITY_INST_ID = as.numeric(row.names(.)),
+    LIFECYCLE_ID = "END"
+  )
+
+
+# Define analytics functions
+# Trace number
+get_trace_num <- function(df){
+  number_of_traces(
+    eventlog(
+           df,
+           case_id = "CASE",
+           activity_id = "ACTIVITY",
+           activity_instance_id = "ACTIVITY_INST_ID",
+           lifecycle_id = "LIFECYCLE_ID",
+           timestamp = "TIMESTAMP",
+           resource_id = "RESOURCE"
+           ))
+}
+
+# Trace coverage
+get_trace_cov <- function(df){
+  trace_coverage(
+    eventlog(
+      df,
+      case_id = "CASE",
+           activity_id = "ACTIVITY",
+           activity_instance_id = "ACTIVITY_INST_ID",
+           lifecycle_id = "LIFECYCLE_ID",
+           timestamp = "TIMESTAMP",
+           resource_id = "RESOURCE"
+    ), level = "trace")
+}
+
+
+# Trace lenght aggregates
+get_trace_length <- function(df) {
+  tidyr::spread(
+    data = data.frame(
+      metric = c("mean", "median", "min", "max", "st_dev", "q1", "q3", "iqr"),
+      values = trace_length(
+        eventlog(
+          df,
+          case_id = "CASE",
+           activity_id = "ACTIVITY",
+           activity_instance_id = "ACTIVITY_INST_ID",
+           lifecycle_id = "LIFECYCLE_ID",
+           timestamp = "TIMESTAMP",
+           resource_id = "RESOURCE"
+        ),
+        level = "log", units = "day"
+      )[c("mean", "median", "min", "max", "st_dev", "q1", "q3", "iqr")], row.names = NULL
+    ),
+    key = metric, value = values
+  )
+}
+
+
+# Trace lenght by case
+get_trace_length_by_case <- function(df) {
+  trace_length(
+    eventlog(
+      df,
+      case_id = "CASE",
+      activity_id = "ACTIVITY",
+      activity_instance_id = "ACTIVITY_INST_ID",
+      lifecycle_id = "LIFECYCLE_ID",
+      timestamp = "TIMESTAMP",
+      resource_id = "RESOURCE"
+    ),
+    level = "case", units = "day"
+  )
+}
+
+
+# Throughput time
+get_through_time <- function(df) {
+  tidyr::spread(
+    data = data.frame(
+      metric = c("mean", "median", "min", "max", "st_dev", "q1", "q3"),
+      values = throughput_time(
+        eventlog(
+          df,
+          case_id = "CASE",
+           activity_id = "ACTIVITY",
+           activity_instance_id = "ACTIVITY_INST_ID",
+           lifecycle_id = "LIFECYCLE_ID",
+           timestamp = "TIMESTAMP",
+           resource_id = "RESOURCE"
+        ),
+        level = "log", units = "day"
+      )[c("mean", "median", "min", "max", "st_dev", "q1", "q3")], row.names = NULL
+    ),
+    key = metric, value = values
+  )
+}
+
+
+# Throughput time by case
+get_through_time_by_case <- function(df) {
+    throughput_time(
+      eventlog(
+        df,
+        case_id = "CASE",
+        activity_id = "ACTIVITY",
+        activity_instance_id = "ACTIVITY_INST_ID",
+        lifecycle_id = "LIFECYCLE_ID",
+        timestamp = "TIMESTAMP",
+        resource_id = "RESOURCE"
+      ),
+      level = "case", units = "day"
+    )
+}
+
+
+# Genarate nested df
+# Gen nested tables with aggregated stats in nested tables
+by_case_type <- t_isd_eventlog %>%
+  group_by(CLASSIFICATION, APPGROUP) %>%
+  nest() %>%
+  mutate(
+    CASE_NUMBER = map(data, ~length(unique(.$CASE))),
+    EVENT_NUMBER = map(data, ~length(unique(.$ACTIVITY))),
+    TRACE_NUMBER = map(data, get_trace_num),
+    TRACE_COV = map(data, get_trace_cov),
+    TRACE_LENGTH_AGGREGATE = map(data, get_trace_length),
+    TRACE_LENGTH_BY_CASE = map(data, get_trace_length_by_case),
+    THROUGH_TIME_AGGREGATE = map(data, get_through_time),
+    THROUGH_TIME_BY_CASE = map(data, get_through_time_by_case)
+  )
+```
+
+## Case and Trace Statistics
+
+### Cases by Applicaton Group
+
+```{r, fig.width=12}
+by_case_type %>%
+  select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
+  unnest() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(APPGROUP = forcats::fct_rev(
+    forcats::fct_relevel(
+      factor(APPGROUP),
+      "NA",
+      after = Inf
+    )
+  )) %>%
+  ggplot(aes(
+    x = APPGROUP,
+    y = CASE_NUMBER
+  )) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
+  labs(
+    x = "Application Group",
+    y = "# of Cases",
+    title = "Number of Cases"
+  )
+```
+
+
+### Traces by Applicaton Group (Process Complexity Based on Trace Variation)
+
+```{r, fig.width=12}
+by_case_type %>%
+  select(CLASSIFICATION, APPGROUP, TRACE_NUMBER) %>%
+  unnest() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(APPGROUP = forcats::fct_rev(
+    forcats::fct_relevel(
+      factor(APPGROUP),
+      "NA",
+      after = Inf
+    )
+  )) %>%
+  ggplot(aes(
+    x = APPGROUP,
+    y = average_coverage
+  )) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
+  labs(
+    x = "Application Group",
+    y = "Average Coverage",
+    title = "Relative Trace Number (No. of Traces to Cover 100 Cases)"
+  )
+```
+
+
+### Trace Coverage by Application Group
+
+```{r,  fig.width=12}
+by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_COV) %>% 
+  unnest() %>% 
+  group_by(CLASSIFICATION, APPGROUP) %>%
+  mutate(RNUM = row_number()) %>%
+  ungroup() %>% 
+  ggplot(aes(x = RNUM, y = cum_sum)) +
+      geom_line() +
+      theme(axis.text.x = element_text(angle = 90),
+            strip.text.y = element_text(angle = 0)) +
+      coord_cartesian(xlim = c(0, 500)) +
+      facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
+      labs(
+          x = "Unique traces",
+          y = "Coverage (Cumulative Perentage)",
+          title = "Trace Coverage Per Case Type"
+        )
 ```
