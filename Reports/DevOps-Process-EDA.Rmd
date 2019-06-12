@@ -91,9 +91,11 @@ t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED),
                           TIMESTAMP = ymd_hms(TIMESTAMP))
 ```
 
+# 1. Volumes
 
-# Number of Tickets Started and Closed
-```{r, fig.width=12}
+## 1.1. Number of Tickets Started and Closed
+
+```{r, fig.width=10}
 t_started <- t_isd %>%
   # Transform data
   filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
@@ -118,12 +120,13 @@ t_closed <- t_isd %>%
 
 t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION")) %>%
   tidyr::gather(-MONTH, -CLASSIFICATION, key = METRIC, value = COUNT) %>% 
-  tidyr::replace_na(list(COUNT = 0)) %>% 
+  tidyr::replace_na(list(COUNT = 0)) %>%
   # Plot
-  ggplot(aes(x = substr(as.character(MONTH), 1, 7), y = COUNT, group = METRIC, colour = METRIC)) +
+  ggplot(aes(x = as.Date(MONTH), y = COUNT, group = METRIC, colour = METRIC)) +
   geom_line(size = 0.8) +
+  scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
   #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
-  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(angle = 90, size = 8)) +
   facet_grid(.~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
   labs(
     x = "Month",
@@ -133,8 +136,9 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION")) %>%
 ```
 
 
-# Number of Tickets Started and Closed by Application Group
-```{r, fig.width=12}
+## 1.2. Number of Tickets Started and Closed by Application Group
+
+```{r, fig.width=10}
 t_started <- t_isd %>%
   # Transform data
   filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
@@ -161,10 +165,11 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION", "APPGROUP"))
   tidyr::gather(-MONTH, -CLASSIFICATION, -APPGROUP, key = METRIC, value = COUNT) %>% 
   tidyr::replace_na(list(COUNT = 0)) %>% 
   # Plot
-  ggplot(aes(x = substr(as.character(MONTH), 1, 7), y = COUNT, group = METRIC, colour = METRIC)) +
+  ggplot(aes(x = as.Date(MONTH), y = COUNT, group = METRIC, colour = METRIC)) +
   geom_line(size = 0.8) +
+  scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
   #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
-  theme(axis.text.x = element_text(angle = 90),
+  theme(axis.text.x = element_text(angle = 90, size = 8),
         strip.text.y = element_text(angle = 0)) +
   facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
   labs(
@@ -174,9 +179,7 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION", "APPGROUP"))
   )
 ```
 
-# Process Structure by Case Type
-
-Each case type is a different contact reason. Thus this part of the analysis is run for case types separately.
+# 2. Process Structure
 
 ``` {r}
 # Add cols to event log required by BupaR
@@ -316,11 +319,11 @@ by_case_type <- t_isd_eventlog %>%
   )
 ```
 
-## Case and Trace Statistics
 
-### Cases by Applicaton Group
 
-```{r, fig.width=12}
+## 2.1. Total Numner of Cases by Applicaton Group Between 2017-06 and 2019-05
+
+```{r, fig.width=10}
 by_case_type %>%
   select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
   unnest() %>%
@@ -343,14 +346,16 @@ by_case_type %>%
   labs(
     x = "Application Group",
     y = "# of Cases",
-    title = "Number of Cases"
+    title = "Number of Cases (2 years span)"
   )
 ```
 
 
-### Traces by Applicaton Group (Process Complexity Based on Trace Variation)
+## 2.2. Traces by Applicaton Group (Process Complexity Based on Trace Variation)
 
-```{r, fig.width=12}
+Average trace coverage gives an insight to the complexity of the underlying process. The more traces needed to cover a 100 cases the higher the variation of traces, thus the more complex the process.
+
+```{r, fig.width=10}
 by_case_type %>%
   select(CLASSIFICATION, APPGROUP, TRACE_NUMBER) %>%
   unnest() %>%
@@ -367,7 +372,7 @@ by_case_type %>%
     y = average_coverage
   )) +
   geom_bar(stat = "identity") +
-  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(angle = 0)) +
   coord_flip() +
   facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
   labs(
@@ -378,9 +383,11 @@ by_case_type %>%
 ```
 
 
-### Trace Coverage by Application Group
+## 2.3 Trace Coverage by Application Group
 
-```{r,  fig.width=12}
+Trace coverage distribution is another angle on process complexity. It shows the distribution of unique traces covering covering the process. The faster the line reaches 100% the lower is the number of unique traces, thus the less complex the process.
+
+```{r,  fig.width=10}
 by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_COV) %>% 
   unnest() %>% 
   group_by(CLASSIFICATION, APPGROUP) %>%
@@ -395,6 +402,197 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_COV) %>%
       labs(
           x = "Unique traces",
           y = "Coverage (Cumulative Perentage)",
-          title = "Trace Coverage Per Case Type"
+          title = "Trace Coverage By Application Group"
         )
+```
+
+
+# 3. Performance Statistics
+
+
+## 3.1. Throughput Time Recent Performance (medians in day 2019)
+
+An overview of throughput times from the last five months.
+
+```{r,  fig.width=10}
+case_month <- t_isd_eventlog %>% 
+  group_by(CASE) %>%
+  summarize(START_MONTH = floor_date(min(TIMESTAMP), unit="months")) %>% 
+  ungroup()
+
+by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+  unnest() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(APPGROUP = forcats::fct_rev(
+    forcats::fct_relevel(
+      factor(APPGROUP),
+      "NA",
+      after = Inf
+    )
+  )) %>%
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  summarize(THROUGHPUT_TIME_MEDIAN = median(throughput_time),
+             THROUGHPUT_TIME_AVG = mean(throughput_time)) %>% 
+  ungroup() %>%
+  ggplot(aes(
+    x = APPGROUP,
+    y = THROUGHPUT_TIME_MEDIAN
+  )) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 0)) +
+  coord_flip() +
+  facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
+  labs(
+    x = "Application Group",
+    y = "Median Throughput Time (days)",
+    title = "Median Throughput Times (2019)"
+  )
+```
+
+
+## 3.2. Throughput Time Two Years Seasonality
+
+No apparent seasonal trends, however, process in general appears more stable in 2019.
+
+```{r,  fig.width=10}
+by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+  unnest() %>%
+  left_join(case_month, by = "CASE") %>% 
+  group_by(CLASSIFICATION, APPGROUP, START_MONTH) %>% 
+  summarize(THROUGHPUT_TIME_MEDIAN = median(throughput_time),
+             THROUGHPUT_TIME_AVG = mean(throughput_time)) %>% 
+  ungroup() %>%
+  ggplot(
+    aes(x = START_MONTH,
+        y = THROUGHPUT_TIME_MEDIAN)) +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0)) +
+  facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10), scales = "free") +
+  labs(
+    y = "Throughput Time (day)",
+    x = "Month",
+    title = "Median of Throughput Time by Month"
+  )
+```
+
+
+## 3.3. Throughput Time Distributions (2019)
+
+Strange bimodalitiy in case of INC may refer to a fast-paced happy-flow that is treated with either higher prioriry or with less steps. Needs process mining to confirm.
+
+```{r,  fig.width=10}
+by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+  unnest() %>%
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  ungroup() %>%
+  ggplot(
+      aes(x = throughput_time)) +
+    geom_histogram(bins = 50) +
+    coord_cartesian(xlim = c(0, 50)) +
+    theme(axis.text.x = element_text(angle = 0),
+          strip.text.y = element_text(angle = 0)) +
+    facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
+    labs(
+      y = "Throughput Time (day)",
+      x = "Month",
+      title = "Throughput Time Distribution"
+    )
+```
+
+
+## 3.4. Trace Length Recent Performance (median num of steps 2019)
+
+```{r, fig.width=10}
+case_month <- t_isd_eventlog %>% 
+  group_by(CASE) %>%
+  summarize(START_MONTH = floor_date(min(TIMESTAMP), unit="months")) %>% 
+  ungroup()
+
+by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+  unnest() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(APPGROUP = forcats::fct_rev(
+    forcats::fct_relevel(
+      factor(APPGROUP),
+      "NA",
+      after = Inf
+    )
+  )) %>%
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  summarize(TRACE_LENGTH_MEDIAN = median(trace_length),
+             TRACE_LENGTH_AVG = mean(trace_length)) %>% 
+  ungroup() %>%
+  ggplot(aes(
+    x = APPGROUP,
+    y = TRACE_LENGTH_MEDIAN
+  )) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 0)) +
+  coord_flip() +
+  facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
+  labs(
+    x = "Application Group",
+    y = "Median Trace Lenght (num of steps)",
+    title = "Median Trace Length (2019)"
+  )
+```
+
+
+## 3.5. Trace Lenght Two Years Seasonality
+
+Low variability of trace lenght in time suggest standardized process flows for INC. RFC and DEV processes show higher trace length variability.
+
+```{r,  fig.width=10}
+by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+  unnest() %>%
+  left_join(case_month, by = "CASE") %>% 
+  group_by(CLASSIFICATION, APPGROUP, START_MONTH) %>% 
+  summarize(TRACE_LENGTH_MEDIAN = median(trace_length),
+             TRACE_LENGTH_AVG = mean(trace_length)) %>% 
+  ungroup() %>%
+  ggplot(
+    aes(x = START_MONTH,
+        y = TRACE_LENGTH_MEDIAN)) +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0)) +
+  facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10), scales = "free") +
+  labs(
+    y = "Trace Lenght (num of steps)",
+    x = "Month",
+    title = "Median of Trace Length by Month"
+  )
+```
+
+
+## 3.6. Trace Lenght Distributions (2019)
+
+INC shows strange bimodality. Need to compare process branches.
+
+```{r,  fig.width=10}
+by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+  unnest() %>%
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  ungroup() %>%
+  ggplot(
+      aes(x = trace_length)) +
+    geom_histogram(bins = 50) +
+    coord_cartesian(xlim = c(0, 50)) +
+    theme(axis.text.x = element_text(angle = 0),
+          strip.text.y = element_text(angle = 0)) +
+    facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
+    labs(
+      y = "Trace Lenght (num of steps)",
+      x = "Month",
+      title = "Trace Lenght Distribution"
+    )
 ```
