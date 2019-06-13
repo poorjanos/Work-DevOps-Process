@@ -125,7 +125,6 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION")) %>%
   ggplot(aes(x = as.Date(MONTH), y = COUNT, group = METRIC, colour = METRIC)) +
   geom_line(size = 0.8) +
   scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
-  #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
   theme(axis.text.x = element_text(angle = 90, size = 8)) +
   facet_grid(.~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
   labs(
@@ -168,7 +167,6 @@ t_started %>% left_join(t_closed, by = c("MONTH", "CLASSIFICATION", "APPGROUP"))
   ggplot(aes(x = as.Date(MONTH), y = COUNT, group = METRIC, colour = METRIC)) +
   geom_line(size = 0.8) +
   scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
-  #scale_y_continuous(label = unit_format(unit = "K", scale = 1e-3)) +
   theme(axis.text.x = element_text(angle = 90, size = 8),
         strip.text.y = element_text(angle = 0)) +
   facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
@@ -304,7 +302,7 @@ get_through_time_by_case <- function(df) {
 
 # Genarate nested df
 # Gen nested tables with aggregated stats in nested tables
-by_case_type <- t_isd_eventlog %>%
+by_class_appgroup <- t_isd_eventlog %>%
   group_by(CLASSIFICATION, APPGROUP) %>%
   nest() %>%
   mutate(
@@ -320,43 +318,89 @@ by_case_type <- t_isd_eventlog %>%
 ```
 
 
-
-## 2.1. Total Numner of Cases by Applicaton Group Between 2017-06 and 2019-05
+## 2.1. Absolute Frequency of Ticket Types between 2017-06 and 2019-05
 
 ```{r, fig.width=10}
-by_case_type %>%
+by_class_appgroup %>%
+  # Transform data
   select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
   unnest() %>%
   replace_na(list(APPGROUP = "NA")) %>%
-  mutate(APPGROUP = forcats::fct_rev(
-    forcats::fct_relevel(
-      factor(APPGROUP),
-      "NA",
-      after = Inf
-    )
-  )) %>%
+  mutate(
+    APPGROUP =
+      forcats::fct_relevel(
+        factor(APPGROUP),
+        "NA",
+        after = Inf
+      )
+  ) %>%
+  # Plot
   ggplot(aes(
     x = APPGROUP,
-    y = CASE_NUMBER
+    y = CASE_NUMBER,
+    group = CLASSIFICATION,
+    fill = CLASSIFICATION
   )) +
   geom_bar(stat = "identity") +
+  geom_text(aes(label = CASE_NUMBER), position = position_stack(vjust = 0.5), size = 3) +
   theme(axis.text.x = element_text(angle = 90)) +
-  coord_flip() +
-  facet_grid(. ~ CLASSIFICATION, labeller = label_wrap_gen(width = 8)) +
   labs(
     x = "Application Group",
-    y = "# of Cases",
-    title = "Number of Cases (2 years span)"
+    y = "Absolute Frequency (count)",
+    title = "Absolute Frequency of Ticket Types (2 years span)",
+    fill = "Ticket Type"
   )
 ```
 
 
-## 2.2. Traces by Applicaton Group (Process Complexity Based on Trace Variation)
-
-Average trace coverage gives an insight to the complexity of the underlying process. The more traces needed to cover a 100 cases the higher the variation of traces, thus the more complex the process.
+## 2.2. Relative Frequency of Ticket Types between 2017-06 and 2019-05
 
 ```{r, fig.width=10}
-by_case_type %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
+  unnest() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(
+    APPGROUP =
+      forcats::fct_relevel(
+        factor(APPGROUP),
+        "NA",
+        after = Inf
+      )
+  ) %>%
+  arrange(APPGROUP, CLASSIFICATION) %>%
+  group_by(APPGROUP) %>%
+  mutate(TOTAL_CASE_NUM = sum(CASE_NUMBER)) %>%
+  ungroup() %>%
+  mutate(RELATIVE_FREQ = CASE_NUMBER / TOTAL_CASE_NUM) %>%
+  # Plot
+  ggplot(aes(
+    x = APPGROUP,
+    y = RELATIVE_FREQ,
+    group = CLASSIFICATION,
+    fill = CLASSIFICATION
+  )) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::percent(RELATIVE_FREQ)), position = position_stack(vjust = 0.5), size = 3) +
+  scale_y_continuous(labels = percent) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(
+    x = "Application Group",
+    y = "Relative Frequency (percent)",
+    title = "Relative Frequency of Ticket Types",
+    fill = "Ticket Type"
+  )
+```
+
+
+## 2.3. Relative Trace Number (Process Complexity Based on Trace Variation)
+
+Relative trace coverage gives an insight to the complexity of the underlying process. The more traces needed to cover a 100 cases the higher the variation of traces, thus the more complex the process.
+
+```{r, fig.width=10}
+by_class_appgroup %>%
+  # Transform data
   select(CLASSIFICATION, APPGROUP, TRACE_NUMBER) %>%
   unnest() %>%
   replace_na(list(APPGROUP = "NA")) %>%
@@ -367,6 +411,7 @@ by_case_type %>%
       after = Inf
     )
   )) %>%
+  # Plot
   ggplot(aes(
     x = APPGROUP,
     y = average_coverage
@@ -383,16 +428,19 @@ by_case_type %>%
 ```
 
 
-## 2.3 Trace Coverage by Application Group
+## 2.4. Trace Coverage
 
 Trace coverage distribution is another angle on process complexity. It shows the distribution of unique traces covering covering the process. The faster the line reaches 100% the lower is the number of unique traces, thus the less complex the process.
 
 ```{r,  fig.width=10}
-by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_COV) %>% 
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, TRACE_COV) %>% 
   unnest() %>% 
   group_by(CLASSIFICATION, APPGROUP) %>%
   mutate(RNUM = row_number()) %>%
-  ungroup() %>% 
+  ungroup() %>%
+  # Plot
   ggplot(aes(x = RNUM, y = cum_sum)) +
       geom_line() +
       theme(axis.text.x = element_text(angle = 90),
@@ -415,12 +463,15 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_COV) %>%
 An overview of throughput times from the last five months.
 
 ```{r,  fig.width=10}
+# Compute starting month for each case
 case_month <- t_isd_eventlog %>% 
   group_by(CASE) %>%
   summarize(START_MONTH = floor_date(min(TIMESTAMP), unit="months")) %>% 
   ungroup()
 
-by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
   unnest() %>%
   replace_na(list(APPGROUP = "NA")) %>%
   mutate(APPGROUP = forcats::fct_rev(
@@ -436,6 +487,7 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
   summarize(THROUGHPUT_TIME_MEDIAN = median(throughput_time),
              THROUGHPUT_TIME_AVG = mean(throughput_time)) %>% 
   ungroup() %>%
+  # Plot
   ggplot(aes(
     x = APPGROUP,
     y = THROUGHPUT_TIME_MEDIAN
@@ -457,13 +509,16 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
 No apparent seasonal trends, however, process in general appears more stable in 2019.
 
 ```{r,  fig.width=10}
-by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
   unnest() %>%
   left_join(case_month, by = "CASE") %>% 
   group_by(CLASSIFICATION, APPGROUP, START_MONTH) %>% 
   summarize(THROUGHPUT_TIME_MEDIAN = median(throughput_time),
              THROUGHPUT_TIME_AVG = mean(throughput_time)) %>% 
   ungroup() %>%
+  # Plot
   ggplot(
     aes(x = START_MONTH,
         y = THROUGHPUT_TIME_MEDIAN)) +
@@ -484,12 +539,15 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
 Strange bimodalitiy in case of INC may refer to a fast-paced happy-flow that is treated with either higher prioriry or with less steps. Needs process mining to confirm.
 
 ```{r,  fig.width=10}
-by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
   unnest() %>%
   left_join(case_month, by = "CASE") %>% 
   filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
   group_by(CLASSIFICATION, APPGROUP) %>% 
   ungroup() %>%
+  # Plot
   ggplot(
       aes(x = throughput_time)) +
     geom_histogram(bins = 50) +
@@ -498,8 +556,8 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
           strip.text.y = element_text(angle = 0)) +
     facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
     labs(
-      y = "Throughput Time (day)",
-      x = "Month",
+      y = "Count",
+      x = "Throughput Time (days)",
       title = "Throughput Time Distribution"
     )
 ```
@@ -508,12 +566,9 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
 ## 3.4. Trace Length Recent Performance (median num of steps 2019)
 
 ```{r, fig.width=10}
-case_month <- t_isd_eventlog %>% 
-  group_by(CASE) %>%
-  summarize(START_MONTH = floor_date(min(TIMESTAMP), unit="months")) %>% 
-  ungroup()
-
-by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
   unnest() %>%
   replace_na(list(APPGROUP = "NA")) %>%
   mutate(APPGROUP = forcats::fct_rev(
@@ -529,6 +584,7 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
   summarize(TRACE_LENGTH_MEDIAN = median(trace_length),
              TRACE_LENGTH_AVG = mean(trace_length)) %>% 
   ungroup() %>%
+  # Plot
   ggplot(aes(
     x = APPGROUP,
     y = TRACE_LENGTH_MEDIAN
@@ -550,13 +606,16 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
 Low variability of trace lenght in time suggest standardized process flows for INC. RFC and DEV processes show higher trace length variability.
 
 ```{r,  fig.width=10}
-by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
   unnest() %>%
   left_join(case_month, by = "CASE") %>% 
   group_by(CLASSIFICATION, APPGROUP, START_MONTH) %>% 
   summarize(TRACE_LENGTH_MEDIAN = median(trace_length),
              TRACE_LENGTH_AVG = mean(trace_length)) %>% 
   ungroup() %>%
+  # Plot
   ggplot(
     aes(x = START_MONTH,
         y = TRACE_LENGTH_MEDIAN)) +
@@ -577,12 +636,15 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
 INC shows strange bimodality. Need to compare process branches.
 
 ```{r,  fig.width=10}
-by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
+by_class_appgroup %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
   unnest() %>%
   left_join(case_month, by = "CASE") %>% 
   filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
   group_by(CLASSIFICATION, APPGROUP) %>% 
   ungroup() %>%
+  # Plot
   ggplot(
       aes(x = trace_length)) +
     geom_histogram(bins = 50) +
@@ -591,8 +653,70 @@ by_case_type %>% select(CLASSIFICATION, APPGROUP, TRACE_LENGTH_BY_CASE) %>%
           strip.text.y = element_text(angle = 0)) +
     facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
     labs(
-      y = "Trace Lenght (num of steps)",
-      x = "Month",
+      y = "Count",
+      x = "Trace Length",
       title = "Trace Lenght Distribution"
     )
+```
+
+
+# 4. INC Deep Dive
+
+```{r}
+# Genarate nested df
+# Gen nested tables with aggregated stats in nested tables
+by_class_appgroup_app <- t_isd_eventlog %>%
+  group_by(CLASSIFICATION, APPGROUP, APPLICATION) %>%
+  nest() %>%
+  mutate(
+    CASE_NUMBER = map(data, ~length(unique(.$CASE))),
+    EVENT_NUMBER = map(data, ~length(unique(.$ACTIVITY))),
+    TRACE_NUMBER = map(data, get_trace_num),
+    TRACE_COV = map(data, get_trace_cov),
+    TRACE_LENGTH_AGGREGATE = map(data, get_trace_length),
+    TRACE_LENGTH_BY_CASE = map(data, get_trace_length_by_case),
+    THROUGH_TIME_AGGREGATE = map(data, get_through_time),
+    THROUGH_TIME_BY_CASE = map(data, get_through_time_by_case)
+  )
+```
+
+
+## 4.1. Absolute Frequency of INC Ticket Types between 2017-06 and 2019-05
+
+```{r, fig.width=10}
+by_class_appgroup_app %>%
+  # Transform data
+  filter(CLASSIFICATION == "Hibabejelentés (INC)") %>%
+  select(APPLICATION, APPGROUP, CASE_NUMBER) %>% 
+  unnest() %>%
+  mutate(APPLICATION = forcats::fct_lump(factor(APPLICATION), w = CASE_NUMBER, n = 20)) %>% 
+  replace_na(list(APPGROUP = "NA")) %>%
+  mutate(
+    APPGROUP =
+      forcats::fct_relevel(
+        factor(APPGROUP),
+        "NA",
+        after = Inf
+      )
+  ) %>%
+  group_by(APPGROUP, APPLICATION) %>% 
+  summarize(CASE_NUMBER = sum(CASE_NUMBER)) %>% 
+  ungroup() %>% 
+  arrange(APPGROUP, APPLICATION) %>% 
+  # Plot
+  ggplot(aes(
+    x = APPGROUP,
+    y = CASE_NUMBER,
+    group = APPLICATION,
+    fill = APPLICATION
+  )) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = CASE_NUMBER), position = position_stack(vjust = 0.5), size = 3) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(
+    x = "Application Group",
+    y = "Absolute Frequency (count)",
+    title = "Absolute Frequency of INC Ticket Types (2 years span)",
+    fill = "Ticket Type"
+  )
 ```
