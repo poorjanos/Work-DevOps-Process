@@ -36,6 +36,7 @@ library(bupaR)
 library(processmapR)
 library(DiagrammeR)
 library(forcats)
+library(stringr)
 ```
 
 ```{r, message=FALSE, include=FALSE}
@@ -88,7 +89,11 @@ dbDisconnect(jdbcConnection)
 
 # Transformations
 t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED),
-                          TIMESTAMP = ymd_hms(TIMESTAMP))
+                          TIMESTAMP = ymd_hms(TIMESTAMP),
+                          APPGROUP = case_when(stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
+                                               TRUE ~ APPLICATION_GROUP_CONCAT),
+                          APPSINGLE = case_when(stringr::str_detect(APPLICATION, ";") ~ "Multiple",
+                                               TRUE ~ "Single"))
 ```
 
 # 1. Volumes
@@ -647,7 +652,7 @@ by_class_appgroup %>%
   # Plot
   ggplot(
       aes(x = trace_length)) +
-    geom_histogram(bins = 50) +
+    geom_histogram(bins = 30) +
     coord_cartesian(xlim = c(0, 50)) +
     theme(axis.text.x = element_text(angle = 0),
           strip.text.y = element_text(angle = 0)) +
@@ -660,9 +665,9 @@ by_class_appgroup %>%
 ```
 
 
-# 4. INC Deep Dive
+<!-- # 4. INC Deep Dive -->
 
-```{r}
+```{r, include=FALSE}
 # Genarate nested df
 # Gen nested tables with aggregated stats in nested tables
 by_class_appgroup_app <- t_isd_eventlog %>%
@@ -681,9 +686,9 @@ by_class_appgroup_app <- t_isd_eventlog %>%
 ```
 
 
-## 4.1. Absolute Frequency of INC Ticket Types between 2017-06 and 2019-05
+<!-- ## 4.1. Absolute Frequency of INC Ticket Types between 2017-06 and 2019-05 -->
 
-```{r, fig.width=10}
+```{r, fig.width=10, include=FALSE}
 by_class_appgroup_app %>%
   # Transform data
   filter(CLASSIFICATION == "Hibabejelentés (INC)") %>%
