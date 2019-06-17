@@ -89,7 +89,7 @@
                (  SELECT   distappgroup.issues,
                            LISTAGG (
                               distappgroup.applicationgroup,
-                              ','
+                              '/'
                            )
                               WITHIN GROUP (ORDER BY
                                                distappgroup.applicationgroup)
