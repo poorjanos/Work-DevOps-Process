@@ -83,17 +83,38 @@ readQuery <-
 query_isd <- readQuery(here::here("SQL", "get_ISD_data.sql"))
 t_isd <- dbGetQuery(jdbcConnection, query_isd)
 
+query_timesheet <- readQuery(here::here("SQL", "get_workhours_per_issue.sql"))
+t_timesheet <- dbGetQuery(jdbcConnection, query_timesheet)
+
 # Close db connection: kontakt
 dbDisconnect(jdbcConnection)
 
 
 # Transformations
-t_isd <- t_isd %>% mutate(CREATED = ymd_hms(CREATED),
-                          TIMESTAMP = ymd_hms(TIMESTAMP),
-                          APPGROUP = case_when(stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
-                                               TRUE ~ APPLICATION_GROUP_CONCAT),
-                          APPSINGLE = case_when(stringr::str_detect(APPLICATION, ";") ~ "Multiple",
-                                               TRUE ~ "Single"))
+t_isd <- t_isd %>% mutate(
+  CREATED = ymd_hms(CREATED),
+  TIMESTAMP = ymd_hms(TIMESTAMP),
+  APPGROUP = case_when(
+    stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
+    TRUE ~ APPLICATION_GROUP_CONCAT
+  ),
+  APPSINGLE = case_when(
+    stringr::str_detect(APPLICATION, ";") ~ "Multiple",
+    TRUE ~ "Single"
+  )
+)
+
+t_timesheet <- t_timesheet %>% mutate(
+  CREATED = ymd_hms(CREATED),
+  APPGROUP = case_when(
+    stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
+    TRUE ~ APPLICATION_GROUP_CONCAT
+  ),
+  APPSINGLE = case_when(
+    stringr::str_detect(APPLICATION, ";") ~ "Multiple",
+    TRUE ~ "Single"
+  )
+)
 ```
 
 # 1. Volumes
@@ -724,4 +745,12 @@ by_class_appgroup_app %>%
     title = "Absolute Frequency of INC Ticket Types (2 years span)",
     fill = "Ticket Type"
   )
+```
+
+
+# 4. Timesheet Missing Value Patterns
+
+
+```{r}
+sum(is.na(t_timesheet$HOURS))
 ```
