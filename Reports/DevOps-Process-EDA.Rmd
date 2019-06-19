@@ -95,7 +95,7 @@ t_isd <- t_isd %>% mutate(
   CREATED = ymd_hms(CREATED),
   TIMESTAMP = ymd_hms(TIMESTAMP),
   APPGROUP = case_when(
-    stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
+    stringr::str_detect(APPLICATION_GROUP_CONCAT, "/") ~ "Z_Közös",
     TRUE ~ APPLICATION_GROUP_CONCAT
   ),
   APPSINGLE = case_when(
@@ -107,7 +107,7 @@ t_isd <- t_isd %>% mutate(
 t_timesheet <- t_timesheet %>% mutate(
   CREATED = ymd_hms(CREATED),
   APPGROUP = case_when(
-    stringr::str_detect(APPLICATION_GROUP_CONCAT, ",") ~ "Z_Közös",
+    stringr::str_detect(APPLICATION_GROUP_CONCAT, "/") ~ "Z_Közös",
     TRUE ~ APPLICATION_GROUP_CONCAT
   ),
   APPSINGLE = case_when(
@@ -686,13 +686,36 @@ by_class_appgroup %>%
 ```
 
 
-<!-- # 4. INC Deep Dive -->
+# 4. INC Deep Dive
+
+Process mining reveals root-cause of bimodalitiy of INC throughput distribution: some INC tickets do not flow through the process, but are aborted after report. 
 
 ```{r, include=FALSE}
+# Subset aborted cases
+abort_events <- c("H09", "H10", "H11", "H12", "H13", "H14")
+
+t_INC_to_filter <- t_isd %>%
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  filter(CLASSIFICATION == "Hibabejelentés (INC)") %>%
+  filter(stringr::str_detect(ACTIVITY, paste(abort_events, collapse = "|"))) %>% 
+  distinct(CASE)
+
+
+# Filter for aborted cases then add cols to event log required by BupaR
+t_isd_eventlog_INC_noAbort <- t_isd %>%
+  filter(TIMESTAMP >= as.Date("2017-06-01") & TIMESTAMP <= as.Date("2019-05-31")) %>%
+  arrange(CASE, TIMESTAMP) %>%
+  filter(!CASE %in% t_INC_to_filter$CASE) %>% 
+  mutate(
+    ACTIVITY_INST_ID = as.numeric(row.names(.)),
+    LIFECYCLE_ID = "END"
+  )
+
+
 # Genarate nested df
 # Gen nested tables with aggregated stats in nested tables
-by_class_appgroup_app <- t_isd_eventlog %>%
-  group_by(CLASSIFICATION, APPGROUP, APPLICATION) %>%
+by_class_appgroup_INC_noAbort <- t_isd_eventlog_INC_noAbort %>%
+  group_by(CLASSIFICATION, APPGROUP) %>%
   nest() %>%
   mutate(
     CASE_NUMBER = map(data, ~length(unique(.$CASE))),
@@ -707,50 +730,107 @@ by_class_appgroup_app <- t_isd_eventlog %>%
 ```
 
 
-<!-- ## 4.1. Absolute Frequency of INC Ticket Types between 2017-06 and 2019-05 -->
+## 4.1. INC throughput times without aborted INC tickets
 
-```{r, fig.width=10, include=FALSE}
-by_class_appgroup_app %>%
+```{r, fig.width=8.5, fig.height = 5.5}
+# Compute starting month for each case
+case_month <- t_isd_eventlog %>% 
+  group_by(CASE) %>%
+  summarize(START_MONTH = floor_date(min(TIMESTAMP), unit="months")) %>% 
+  ungroup()
+
+
+by_class_appgroup_INC_noAbort %>% 
   # Transform data
-  filter(CLASSIFICATION == "Hibabejelentés (INC)") %>%
-  select(APPLICATION, APPGROUP, CASE_NUMBER) %>% 
+  select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
   unnest() %>%
-  mutate(APPLICATION = forcats::fct_lump(factor(APPLICATION), w = CASE_NUMBER, n = 20)) %>% 
   replace_na(list(APPGROUP = "NA")) %>%
-  mutate(
-    APPGROUP =
-      forcats::fct_relevel(
-        factor(APPGROUP),
-        "NA",
-        after = Inf
-      )
-  ) %>%
-  group_by(APPGROUP, APPLICATION) %>% 
-  summarize(CASE_NUMBER = sum(CASE_NUMBER)) %>% 
-  ungroup() %>% 
-  arrange(APPGROUP, APPLICATION) %>% 
+  filter(APPGROUP != "NA") %>% 
+  mutate(APPGROUP = forcats::fct_rev(forcats::fct_recode(APPGROUP, Közös = "Z_Közös"))) %>% 
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  summarize(THROUGHPUT_TIME_MEDIAN = median(throughput_time),
+             THROUGHPUT_TIME_AVG = mean(throughput_time)) %>% 
+  ungroup() %>%
   # Plot
   ggplot(aes(
     x = APPGROUP,
-    y = CASE_NUMBER,
-    group = APPLICATION,
-    fill = APPLICATION
+    y = THROUGHPUT_TIME_MEDIAN
   )) +
   geom_bar(stat = "identity") +
-  geom_text(aes(label = CASE_NUMBER), position = position_stack(vjust = 0.5), size = 3) +
-  theme(axis.text.x = element_text(angle = 90)) +
+  geom_text(aes(label = round(THROUGHPUT_TIME_MEDIAN, 2)), size = 3, hjust = 0) +
+  theme(axis.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0)) +
+  coord_flip(ylim = c(0, 80)) +
+  facet_wrap(~CLASSIFICATION, nrow = 2, labeller = label_wrap_gen(width = 18)) +
   labs(
     x = "Application Group",
-    y = "Absolute Frequency (count)",
-    title = "Absolute Frequency of INC Ticket Types (2 years span)",
-    fill = "Ticket Type"
+    y = "Median Throughput Time (days)",
+    title = "Median Throughput Times (2019)"
   )
 ```
 
+## 4.2. Throughput Time Distributions without aborted INC tickets (2019)
 
-# 4. Timesheet Missing Value Patterns
+```{r,  fig.width=10}
+by_class_appgroup_INC_noAbort %>%
+  # Transform data
+  select(CLASSIFICATION, APPGROUP, THROUGH_TIME_BY_CASE) %>%
+  unnest() %>%
+  left_join(case_month, by = "CASE") %>% 
+  filter(START_MONTH >= as.Date("2019-01-01") & START_MONTH <= as.Date("2019-06-01")) %>%
+  group_by(CLASSIFICATION, APPGROUP) %>% 
+  ungroup() %>%
+  # Plot
+  ggplot(
+      aes(x = throughput_time)) +
+    geom_histogram(bins = 50) +
+    coord_cartesian(xlim = c(0, 50)) +
+    theme(axis.text.x = element_text(angle = 0),
+          strip.text.y = element_text(angle = 0)) +
+    facet_grid(APPGROUP~CLASSIFICATION, labeller = label_wrap_gen(width = 10)) +
+    labs(
+      y = "Count",
+      x = "Throughput Time (days)",
+      title = "Throughput Time Distribution"
+    )
+```
 
+
+# 5. Timesheet Missing Value Patterns
+
+Timesheet hours missing for 90% of tickets
+
+```{r, include = FALSE}
+sum(is.na(t_timesheet$HOURS)) / length(t_timesheet$HOURS)
+```
 
 ```{r}
-sum(is.na(t_timesheet$HOURS))
+t_timesheet %>%
+  # Transform data
+  group_by(APPGROUP) %>%
+  summarize(TIMESHEET_MISSING = sum(is.na(HOURS)) / length(HOURS)) %>%
+  ungroup() %>%
+  replace_na(list(APPGROUP = "NA")) %>%
+  filter(APPGROUP != "NA") %>%
+  mutate(APPGROUP = forcats::fct_rev(forcats::fct_recode(APPGROUP, Közös = "Z_Közös"))) %>%
+  # Plot
+  ggplot(aes(
+    x = APPGROUP,
+    y = TIMESHEET_MISSING
+  )) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent) +
+  geom_text(aes(label = paste0(round(TIMESHEET_MISSING, 2) * 100, "%")), size = 4, hjust = 0) +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  coord_flip(ylim = c(0, 1.1)) +
+  labs(
+    x = "Application Group",
+    y = "Ratio of Tickets with Missing Timesheet Data",
+    title = "Ratio of Missing Timesheets"
+  )
 ```
