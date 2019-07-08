@@ -83,8 +83,13 @@ readQuery <-
 query_isd <- readQuery(here::here("SQL", "get_ISD_data.sql"))
 t_isd <- dbGetQuery(jdbcConnection, query_isd)
 
-query_timesheet <- readQuery(here::here("SQL", "get_workhours_per_issue.sql"))
+query_timesheet <- readQuery(here::here("SQL", "get_workhours_per_issue.sql")) # closed cases only
 t_timesheet <- dbGetQuery(jdbcConnection, query_timesheet)
+
+query_timesheet_full <- readQuery(here::here("SQL", "get_workhours_per_issue_by_month.sql")) # open cases as well
+t_timesheet_full <- dbGetQuery(jdbcConnection, query_timesheet_full)
+
+t_mnap <- dbGetQuery(jdbcConnection, 'select * from t_mnap')
 
 # Close db connection: kontakt
 dbDisconnect(jdbcConnection)
@@ -115,6 +120,21 @@ t_timesheet <- t_timesheet %>% mutate(
     TRUE ~ "Single"
   )
 )
+
+t_timesheet_full <- t_timesheet_full %>% mutate(
+  CREATED = ymd_hms(CREATED),
+  LOGGED_MONTH = ymd_hms(LOGGED_MONTH),
+  APPGROUP = case_when(
+    stringr::str_detect(APPLICATION_GROUP_CONCAT, "/") ~ "Z_Közös",
+    TRUE ~ APPLICATION_GROUP_CONCAT
+  ),
+  APPSINGLE = case_when(
+    stringr::str_detect(APPLICATION, ";") ~ "Multiple",
+    TRUE ~ "Single"
+  )
+)
+
+t_mnap <- t_mnap %>% mutate(IDOSZAK = ymd_hms(IDOSZAK))
 ```
 
 # 1. Volumes
@@ -800,37 +820,81 @@ by_class_appgroup_INC_noAbort %>%
 
 # 5. Timesheet Missing Value Patterns
 
-Timesheet hours missing for 90% of tickets
+Timesheet hours missing before Oct, 2018
 
 ```{r, include = FALSE}
-sum(is.na(t_timesheet$HOURS)) / length(t_timesheet$HOURS)
+sum(is.na(t_timesheet$HOURS_WORKTIMESHEET)) / length(t_timesheet$HOURS_WORKTIMESHEET)
 ```
 
-```{r}
-t_timesheet %>%
+```{r, fig.width=11}
+t_timesheet_full %>%
   # Transform data
-  group_by(APPGROUP) %>%
-  summarize(TIMESHEET_MISSING = sum(is.na(HOURS)) / length(HOURS)) %>%
+  select(-LOGGED_MONTH) %>% 
+  group_by(CASE, CREATED, APPGROUP) %>% 
+  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET)) %>% 
+  ungroup() %>% 
+  filter(CREATED >= as.Date("2017-01-01") & CREATED <= as.Date("2019-05-31")) %>%
+  mutate(CREATED = as.Date(floor_date(CREATED, unit = "month"))) %>%
+  group_by(CREATED, APPGROUP) %>%
+  summarize(TIMESHEET_MISSING = 1 - sum(is.na(HOURS_WORKTIMESHEET)) / length(HOURS_WORKTIMESHEET)) %>%
   ungroup() %>%
   replace_na(list(APPGROUP = "NA")) %>%
   filter(APPGROUP != "NA") %>%
-  mutate(APPGROUP = forcats::fct_rev(forcats::fct_recode(APPGROUP, Közös = "Z_Közös"))) %>%
+  mutate(APPGROUP = forcats::fct_recode(APPGROUP, Közös = "Z_Közös")) %>%
   # Plot
   ggplot(aes(
-    x = APPGROUP,
-    y = TIMESHEET_MISSING
+    x = CREATED,
+    y = TIMESHEET_MISSING,
+    group = 1
   )) +
-  geom_bar(stat = "identity") +
+  geom_line() +
+  scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
   scale_y_continuous(labels = percent) +
-  geom_text(aes(label = paste0(round(TIMESHEET_MISSING, 2) * 100, "%")), size = 4, hjust = 0) +
   theme(
     axis.text.x = element_text(angle = 90),
     strip.text.y = element_text(angle = 0)
   ) +
-  coord_flip(ylim = c(0, 1.1)) +
+  facet_grid(.~APPGROUP, labeller = label_wrap_gen(width = 14)) +
   labs(
     x = "Application Group",
-    y = "Ratio of Tickets with Missing Timesheet Data",
-    title = "Ratio of Missing Timesheets"
+    y = "Ratio of Tickets with Logged Workhours",
+    title = "Ratio of Tickets with Logged Workhours"
+  )
+```
+
+
+## 5.1. FTE captured on timesheets
+
+```{r, fig.width=11}
+t_timesheet_full %>%
+  # Transform data
+  filter(!is.na(LOGGED_MONTH)) %>% 
+  filter(LOGGED_MONTH >= as.Date("2017-01-01") & LOGGED_MONTH <= as.Date("2019-05-31")) %>%
+  mutate(LOGGED_MONTH = as.POSIXct(floor_date(LOGGED_MONTH, unit = "month"))) %>%
+  group_by(LOGGED_MONTH, APPGROUP) %>%
+  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(t_mnap, by = c("LOGGED_MONTH" = "IDOSZAK")) %>% 
+  filter(!is.na(APPGROUP)) %>% 
+  mutate(APPGROUP = forcats::fct_recode(APPGROUP, Közös = "Z_Közös"),
+         FTE = HOURS_WORKTIMESHEET/7/MNAP) %>%
+  # Plot
+  ggplot(aes(
+    x = as.Date(LOGGED_MONTH),
+    y = round(FTE, 2),
+    group = 1
+  )) +
+  geom_line() +
+  scale_x_date(date_breaks = '1 months', date_labels = '%Y-%m') +
+  #scale_y_continuous(labels = percent) +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  facet_grid(.~APPGROUP, labeller = label_wrap_gen(width = 14)) +
+  labs(
+    x = "Month",
+    y = "FTE",
+    title = "FTE per Month"
   )
 ```

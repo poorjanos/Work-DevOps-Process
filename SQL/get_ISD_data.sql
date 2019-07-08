@@ -2,7 +2,7 @@
                      i.CREATED AS CREATED,
                      i.TITLE AS ISSUE_TITLE,
                      I.APPLICATIONLIST AS application,
-                     application_group.application_group_concat,
+                     upper(application_group.application_group_concat) as application_group_concat,
                      co.NAME AS COMPANY,
                      org.NAME AS ORGANIZATION,
                      bu.NAME AS BUSINESSEVENT_UNIT,
