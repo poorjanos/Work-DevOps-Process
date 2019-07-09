@@ -123,7 +123,7 @@ t_timesheet <- t_timesheet %>% mutate(
 
 t_timesheet_full <- t_timesheet_full %>% mutate(
   CREATED = ymd_hms(CREATED),
-  LOGGED_MONTH = ymd_hms(LOGGED_MONTH),
+  MONTH_WORKTIMESHEET = ymd_hms(MONTH_WORKTIMESHEET),
   APPGROUP = case_when(
     stringr::str_detect(APPLICATION_GROUP_CONCAT, "/") ~ "Z_Közös",
     TRUE ~ APPLICATION_GROUP_CONCAT
@@ -829,10 +829,10 @@ sum(is.na(t_timesheet$HOURS_WORKTIMESHEET)) / length(t_timesheet$HOURS_WORKTIMES
 ```{r, fig.width=11}
 t_timesheet_full %>%
   # Transform data
-  select(-LOGGED_MONTH) %>% 
-  group_by(CASE, CREATED, APPGROUP) %>% 
-  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET)) %>% 
-  ungroup() %>% 
+  select(-MONTH_WORKTIMESHEET) %>%
+  group_by(CASE, CREATED, APPGROUP) %>%
+  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET)) %>%
+  ungroup() %>%
   filter(CREATED >= as.Date("2017-01-01") & CREATED <= as.Date("2019-05-31")) %>%
   mutate(CREATED = as.Date(floor_date(CREATED, unit = "month"))) %>%
   group_by(CREATED, APPGROUP) %>%
@@ -848,53 +848,130 @@ t_timesheet_full %>%
     group = 1
   )) +
   geom_line() +
-  scale_x_date(date_breaks = '3 months', date_labels = '%Y-%m') +
+  geom_point(size = 0.75) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%Y-%m") +
   scale_y_continuous(labels = percent) +
   theme(
     axis.text.x = element_text(angle = 90),
     strip.text.y = element_text(angle = 0)
   ) +
-  facet_grid(.~APPGROUP, labeller = label_wrap_gen(width = 14)) +
+  facet_grid(. ~ APPGROUP, labeller = label_wrap_gen(width = 14)) +
   labs(
-    x = "Application Group",
+    x = "Month",
     y = "Ratio of Tickets with Logged Workhours",
-    title = "Ratio of Tickets with Logged Workhours"
+    title = "Ratio of Tickets with Logged Workhours (by Application Group)"
   )
 ```
 
 
-## 5.1. FTE captured on timesheets
+
+## 5.1. FTE per Ticket Type
 
 ```{r, fig.width=11}
 t_timesheet_full %>%
   # Transform data
-  filter(!is.na(LOGGED_MONTH)) %>% 
-  filter(LOGGED_MONTH >= as.Date("2017-01-01") & LOGGED_MONTH <= as.Date("2019-05-31")) %>%
-  mutate(LOGGED_MONTH = as.POSIXct(floor_date(LOGGED_MONTH, unit = "month"))) %>%
-  group_by(LOGGED_MONTH, APPGROUP) %>%
+  filter(!is.na(MONTH_WORKTIMESHEET)) %>% 
+  filter(MONTH_WORKTIMESHEET >= as.Date("2017-01-01") & MONTH_WORKTIMESHEET <= as.Date("2019-05-31")) %>%
+  mutate(MONTH_WORKTIMESHEET = as.POSIXct(floor_date(MONTH_WORKTIMESHEET, unit = "month"))) %>%
+  group_by(MONTH_WORKTIMESHEET, CLASSIFICATION) %>%
   summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET, na.rm = TRUE)) %>%
   ungroup() %>%
-  left_join(t_mnap, by = c("LOGGED_MONTH" = "IDOSZAK")) %>% 
-  filter(!is.na(APPGROUP)) %>% 
-  mutate(APPGROUP = forcats::fct_recode(APPGROUP, Közös = "Z_Közös"),
-         FTE = HOURS_WORKTIMESHEET/7/MNAP) %>%
+  left_join(t_mnap, by = c("MONTH_WORKTIMESHEET" = "IDOSZAK")) %>% 
+  mutate(FTE = HOURS_WORKTIMESHEET/7/MNAP) %>%
   # Plot
   ggplot(aes(
-    x = as.Date(LOGGED_MONTH),
+    x = as.Date(MONTH_WORKTIMESHEET),
     y = round(FTE, 2),
     group = 1
   )) +
   geom_line() +
+  geom_point(size = 1) +
   scale_x_date(date_breaks = '1 months', date_labels = '%Y-%m') +
   #scale_y_continuous(labels = percent) +
   theme(
     axis.text.x = element_text(angle = 90),
+    strip.text.x = element_text(angle = 0),
     strip.text.y = element_text(angle = 0)
   ) +
-  facet_grid(.~APPGROUP, labeller = label_wrap_gen(width = 14)) +
+  facet_grid(.~CLASSIFICATION, labeller = label_wrap_gen(width = 20), scales = "free") +
   labs(
     x = "Month",
     y = "FTE",
-    title = "FTE per Month"
+    title = "FTE per Month (by Ticket Type)"
   )
 ```
+
+
+
+## 5.2. FTE per User Organization
+
+```{r, fig.width=10}
+t_timesheet_full %>%
+  # Transform data
+  filter(!is.na(MONTH_WORKTIMESHEET)) %>% 
+  filter(MONTH_WORKTIMESHEET >= as.Date("2017-01-01") & MONTH_WORKTIMESHEET <= as.Date("2019-05-31")) %>%
+  mutate(MONTH_WORKTIMESHEET = as.POSIXct(floor_date(MONTH_WORKTIMESHEET, unit = "month"))) %>%
+  group_by(MONTH_WORKTIMESHEET, USERORG_WORKTIMESHEET) %>%
+  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(t_mnap, by = c("MONTH_WORKTIMESHEET" = "IDOSZAK")) %>% 
+  mutate(FTE = HOURS_WORKTIMESHEET/7/MNAP) %>%
+  # Plot
+  ggplot(aes(
+    x = as.Date(MONTH_WORKTIMESHEET),
+    y = round(FTE, 2),
+    group = 1
+  )) +
+  geom_line() +
+  geom_point(size = 1) +
+  scale_x_date(date_breaks = '1 months', date_labels = '%Y-%m') +
+  #scale_y_continuous(labels = percent) +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    strip.text.x = element_text(angle = 60)
+  ) +
+  facet_grid(.~USERORG_WORKTIMESHEET, labeller = label_wrap_gen(width = 20)) +
+  labs(
+    x = "Month",
+    y = "FTE",
+    title = "FTE per Month (by User Organization)"
+  )
+```
+
+
+## 5.3. FTE per Ticket Type by User Organization
+
+```{r, fig.width=11}
+t_timesheet_full %>%
+  # Transform data
+  filter(!is.na(MONTH_WORKTIMESHEET)) %>% 
+  filter(MONTH_WORKTIMESHEET >= as.Date("2017-01-01") & MONTH_WORKTIMESHEET <= as.Date("2019-05-31")) %>%
+  mutate(MONTH_WORKTIMESHEET = as.POSIXct(floor_date(MONTH_WORKTIMESHEET, unit = "month"))) %>%
+  group_by(MONTH_WORKTIMESHEET, USERORG_WORKTIMESHEET, CLASSIFICATION) %>%
+  summarize(HOURS_WORKTIMESHEET = sum(HOURS_WORKTIMESHEET, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(t_mnap, by = c("MONTH_WORKTIMESHEET" = "IDOSZAK")) %>% 
+  mutate(FTE = HOURS_WORKTIMESHEET/7/MNAP) %>%
+  # Plot
+  ggplot(aes(
+    x = as.Date(MONTH_WORKTIMESHEET),
+    y = round(FTE, 2),
+    group = 1
+  )) +
+  geom_line() +
+  geom_point(size = 1) +
+  scale_x_date(date_breaks = '1 months', date_labels = '%Y-%m') +
+  #scale_y_continuous(labels = percent) +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    strip.text.x = element_text(angle = 60),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  facet_grid(USERORG_WORKTIMESHEET~CLASSIFICATION, labeller = label_wrap_gen(width = 20), scales = "free") +
+  labs(
+    x = "Month",
+    y = "FTE",
+    title = "FTE per Month (by User Organization)"
+  )
+```
+

@@ -33,6 +33,7 @@
                        LEFT JOIN
                           (  SELECT   issue, SUM (hours) AS hours_worktimesheet
                                FROM   KASPERSK.worktimesheet
+                               WHERE timetype = 'WorkTime'
                            GROUP BY   issue) wts_total_hours
                        ON i.oid = wts_total_hours.issue
                     LEFT JOIN
