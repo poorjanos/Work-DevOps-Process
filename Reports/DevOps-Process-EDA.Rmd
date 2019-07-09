@@ -371,12 +371,14 @@ by_class_appgroup %>%
   # Transform data
   select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
   unnest() %>%
-  replace_na(list(APPGROUP = "NA")) %>%
+  #replace_na(list(APPGROUP = "NA")) %>%
+  filter(!is.na(APPGROUP)) %>% 
+  mutate(APPGROUP = forcats::fct_recode(APPGROUP, Közös = "Z_Közös")) %>% 
   mutate(
     APPGROUP =
       forcats::fct_relevel(
         factor(APPGROUP),
-        "NA",
+        "Közös",
         after = Inf
       )
   ) %>%
@@ -406,12 +408,14 @@ by_class_appgroup %>%
   # Transform data
   select(CLASSIFICATION, APPGROUP, CASE_NUMBER) %>%
   unnest() %>%
-  replace_na(list(APPGROUP = "NA")) %>%
+  #replace_na(list(APPGROUP = "NA")) %>%
+  filter(!is.na(APPGROUP)) %>% 
+  mutate(APPGROUP = forcats::fct_recode(APPGROUP, Közös = "Z_Közös")) %>% 
   mutate(
     APPGROUP =
       forcats::fct_relevel(
         factor(APPGROUP),
-        "NA",
+        "Közös",
         after = Inf
       )
   ) %>%
